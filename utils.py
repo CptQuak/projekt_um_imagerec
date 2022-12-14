@@ -1,46 +1,54 @@
 import os
 import numpy as np
 import shutil
+import torch
+from torch import nn
+from datetime import datetime
+import csv
 
 def split_data():
     '''
-    split struktury folderu z obrazami by miec podzial na zbior uczacy i testowy
-    usage -> utils.split_data()
+    Funkcja do podzielenia danych na zbior treningowy i testowy obrazow pobranych z kaggla
     '''
-    root_dir = 'raw-img/'
-    new_dir = 'dataset/'
-    classes = os.listdir('raw-img/')
+    root_dir = 'raw-img/'               # lokalizacja oryginalnych obrazow
+    new_dir = 'dataset/'                # lokalizacja folderu docelowego
+    classes = os.listdir(root_dir)      # obrazy sa podzielone na foldery z nazwa klasy
 
+    # przygotowanie w docelowym folderze folderow na dane treningowe i testowe z klasami
     for cl_ in classes:
         os.makedirs(new_dir + 'train/' + cl_)
         os.makedirs(new_dir + 'test/' + cl_)
 
+    # dla kazdej klasy
     for cl_ in classes:
-        src = root_dir + cl_ # folder to copy images from
-        allFileNames = os.listdir(src)
-        np.random.shuffle(allFileNames)
+        src = root_dir + cl_                # folder to copy images from
+        allFileNames = os.listdir(src)      # lista wszystki obrazow
+        np.random.shuffle(allFileNames)     # losowe przemieszanie
 
-        ## here 0.75 = training ratio
-        train_FileNames, test_FileNames = np.split(
-            np.array(allFileNames), [int(len(allFileNames)*0.75)])
+        # split 0.75 = .75 training ratio i .25 test ratio
+        train_FileNames, test_FileNames = np.split(np.array(allFileNames), [int(len(allFileNames)*0.75)])
 
-        # Converting file names from array to list
-        train_FileNames = [src+'/'+ name for name in train_FileNames]
-        test_FileNames = [src+'/' + name for name in test_FileNames]
-
+        # przypisanie pelnej zrodlowej sciezki dla pliku
+        train_FileNames = [src + '/' + name for name in train_FileNames]
+        test_FileNames =  [src + '/' + name for name in test_FileNames]
+        
+        # informacja ile plikow dla danej klasy i jak split wyglada
         print('Total images  : '+ cl_ + ' ' +str(len(allFileNames)))
         print('Training : '+ cl_ + ' '+str(len(train_FileNames)))
         print('Testing : '+ cl_ + ' '+str(len(test_FileNames)))
         
-        ## Copy pasting images to target directory
-
+        # kopiowanie obrazow do target folderu
         for name in train_FileNames:
             shutil.copy(name, new_dir + 'train/' + cl_)
 
         for name in test_FileNames:
             shutil.copy(name, new_dir + 'test/' + cl_)
 
+
 def data_normalize_values(train_loader, device):
+    '''
+    Funkcja do obliczenia sredniej i odchylen standardowy na kanalach obrazow całego zbioru treningowego
+    '''
     avg_mean = 0.0
     avg_std = 0.0
 
@@ -55,23 +63,21 @@ def data_normalize_values(train_loader, device):
     return avg_mean, avg_std
 
 
-import torch
-from torch import nn
-from datetime import datetime
-import csv
 
 def train_fine_tuning(model, learning_rate, train_loader, test_loader, device, num_epochs=5, param_group=True):
     '''
+    Funkcja do uczenia modeli
     param_group = true - transfer learning
     '''
-    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")   # uniq id do rozroznienia sesji 
+    # utworzenie folderu gdzie gromadzone beda wagi modeli w poszczegolnych epokach
     if not os.path.exists(f'models/{session_id}'):
         os.makedirs(f'models/{session_id}')
+    #liczba obrazow w zbiorach
     train_size = len(train_loader.dataset.imgs)
     test_size = len(test_loader.dataset.imgs)
-    # funkcja celu
-    loss = nn.CrossEntropyLoss(reduction="none")
 
+    # wagi warstwy wyjsciowej modelu
     if model._get_name() in ['Resnet', 'LeNet'] :
         excluded_weights = ["fc.weight", "fc.bias"]
         out_weights = model.fc.parameters()
@@ -79,53 +85,48 @@ def train_fine_tuning(model, learning_rate, train_loader, test_loader, device, n
         excluded_weights = ["classifier.6.weight", "classifier.6.bias"]
         out_weights = model.classifier[6].parameters()
 
-    if param_group:
-        # wszystkie wagi poza warstwa wyjsciową
+    if param_group: # transfer learning
+        # zebranie wszystkie wagi poza warstwa wyjsciową
         params_1x = [param for name, param in model.named_parameters() if name not in excluded_weights]
-        # wyjscie uczone silniejszymi wagami niz reszta sieci
+        # wyjscie uczone wagami 10x wiekszymi niz reszta sieci
         optimizer = torch.optim.SGD([{'params': params_1x},
                                      {'params': out_weights, 'lr': learning_rate * 10}],
                                 lr=learning_rate, weight_decay=0.001)
     else:
         optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=0.001)
     
+    loss = nn.CrossEntropyLoss(reduction="none")    # funkcja celu
+    
     # METRYKI Z UCZENIA SIECI
     metrics = {'train_loss':[], 'train_acc': [], 'test_acc': []}
     # TRAINING LOOP
     for epoch in range(num_epochs):
         print(f'Progress: {epoch+1}/{num_epochs} epochs')
-        # loss i dokladnosc per epoch
-        running_loss = 0.0
-        running_accuracy = 0.0
+        running_loss, running_accuracy = (0.0, 0.0)     # statystyki liczone na epoke
 
         for (data, labels) in train_loader:
-            # wczytanie na gpu danych
-            data, labels = data.to(device), labels.to(device)
-            # ustawienie sieci w trybie uczenia (weight decay)
-            model.train()
-            # wyzrowanie gradientu
-            optimizer.zero_grad()
-            # predykcja
-            labels_pred = model(data)
-            # obleczenie bledzu
-            l = loss(labels_pred, labels)
-            l.sum().backward()
-            # optymalizacja parametrów
-            optimizer.step() 
-            # per batch statistics
+            data, labels = data.to(device), labels.to(device)   # zaladowanie danych na gpu
+            model.train()   # przestawienie sieci w tryb uczenia
+            optimizer.zero_grad()   # zerowanie wektora gradientu
+            labels_pred = model(data)   # predykcja z modelu
+            l = loss(labels_pred, labels)   # obleczenie bledu sieci
+            l.sum().backward()  # backpropagacja bledu
+            optimizer.step()    # optymalizacja parametrów
+            
+            # obliczenie statystyk batcha
             running_loss += l.sum()
             running_accuracy += torch.sum(torch.argmax(labels_pred, axis=1) == labels)
 
-        # per epoch statistics
+        # obliczenie statystyk epoki
         epoch_loss = (running_loss / train_size).item()
         epoch_acc = (running_accuracy.double() / train_size).item()
         metrics['train_loss'].append(epoch_loss)
         metrics['train_acc'].append(epoch_acc)
 
-        # EVAL TRAIN ACCURACY
+        # ewaluacja co epoke bledu na zb testowym
         with torch.no_grad():
-            model.eval() # disables dropout
-            test_acc = 0.0
+            model.eval()    # przestawienie w tryb ewaluacji
+            test_acc = 0.0  # dokladnosc predykcji
             for (data, labels) in test_loader:
                 data, labels = data.to(device), labels.to(device)
                 labels_pred = model(data)
@@ -135,7 +136,7 @@ def train_fine_tuning(model, learning_rate, train_loader, test_loader, device, n
             epoch_test_acc = (test_acc / test_size).item()
             metrics['test_acc'].append(epoch_test_acc)
         
-        # save model parameters and per epoch informations
+        # zapis modelu oraz informacji o uczeniu
         epoch_metrics = [session_id, epoch+1, round(epoch_loss, 3), round(epoch_acc, 3), round(epoch_test_acc, 3)]
         torch.save(model.state_dict(), f'models/{session_id}/{session_id}_{epoch+1}')
         with open('models/results.csv', 'a') as f:
