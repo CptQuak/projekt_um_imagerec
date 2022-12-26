@@ -8,9 +8,6 @@ Wyjasnic Funkcje celu
 
 preprocessing - resize i fragment obrazu, random flip, normalizacja
 
-
-
-
 1. Tested preprocessing parameters for resnet18, weight initialized, 12 min training
 {
     20221209_195344: 'RandomCropResize, RandomFlip, Normalization'
@@ -33,9 +30,7 @@ preprocessing - resize i fragment obrazu, random flip, normalizacja
 }
 on w sumie zadziala nawet bez pretrained
 
-
 5. Lenet, weights RANDOM, 12 min training
 {
     20221209_230012: 'RandomCropResize, RandomFlip, Normalization', 
 }
-
