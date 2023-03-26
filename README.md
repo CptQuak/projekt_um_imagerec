@@ -1,13 +1,11 @@
+# Project for UM classes
+Testing various CNN models for image classification
+
+## Dataset source:
 https://www.kaggle.com/datasets/alessiocorrado99/animals10
 
 
-Wstęp o CNN
-- koncepcyjnie blurem i sobelem pokazac by pokazac czemu uczymy taka siec i czemu w tym efektywna
-
-Wyjasnic Funkcje celu
-
-preprocessing - resize i fragment obrazu, random flip, normalizacja
-
+## Tested models
 1. Tested preprocessing parameters for resnet18, weight initialized, 12 min training
 {
     20221209_195344: 'RandomCropResize, RandomFlip, Normalization'
